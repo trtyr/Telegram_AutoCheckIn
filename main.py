@@ -1,65 +1,41 @@
+from config_loader import ConfigLoader
+from email_sender import EmailSender
+from checkin_handler import CheckinHandler
+from proxy_manager import ProxyManager
 from telethon import TelegramClient, events
-import configparser
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import colorama
+from colorama import Fore, Style
 
-config = configparser.ConfigParser()
-config.read('config.ini')
-API_ID = int(config['telegram']['API_ID'])
-API_HASH = config['telegram']['API_HASH']
+colorama.init()
 
-client = TelegramClient('auto_sign_in_client', API_ID, API_HASH)
+config_loader = ConfigLoader()
+proxy_manager = ProxyManager()
+proxy_manager.setup_proxy()
 
-completed_bots = set()
+email_sender = EmailSender(config_loader.get_email_config())
+checkin_handler = CheckinHandler(len(config_loader.get_bot_configs()))
 
-
-def send_email(subject, body, to_email):
-    sender_email = config['email']['SENDER']
-    sender_password = config['email']['PASSWORD']
-
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = to_email
-    msg['Subject'] = subject
-
-    msg.attach(MIMEText(body, 'plain'))
-
-    try:
-        with smtplib.SMTP_SSL('smtp.qq.com', 465) as server:
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, to_email, msg.as_string())
-            print(f"邮件已发送到 {to_email}")
-            server.quit()
-    except Exception as e:
-        print(f"发送邮件失败: {e}")
+telegram_creds = config_loader.get_telegram_creds()
+client = TelegramClient('auto_sign_in_client', **telegram_creds)
 
 
 async def handle_checkin_message(event, section):
-    recive = config['email']['RECIVE']
     if event.message:
         sender = await event.get_sender()
-        sender_name = sender.username if sender.username else "未知用户名"
+
+        sender_name = sender.username or getattr(
+            sender, 'first_name', '') or getattr(sender, 'last_name',
+                                                 '') or "未知用户名"
         sender_id = sender.id
 
-        print(f"[*] 收到机器人{sender_name} (ID: {sender_id})返回的消息:")
-        print(event.message.text)
+        checkin_handler.add_message(sender_name, sender_id, event.message.text)
+        checkin_handler.mark_completed(sender_name)
 
-        if event.message.text != '':
-            print(f"@{sender_name} 签到完成！\n{'-' * 50}")
-            completed_bots.add(sender_name)
-
-            if len(completed_bots) == len([
-                    section for section in config.sections()
-                    if section.startswith('bot_')
-            ]):
-                print("所有机器人的签到完成，程序结束。")
-
-                subject = "签到结果"
-                body = "Telegram 签到完成。程序已结束。\n\n" + "\n".join(
-                    [f"{sender_name} 签到成功" for sender_name in completed_bots])
-                send_email(subject, body, recive)
-                await client.disconnect()
+        if checkin_handler.is_all_completed():
+            print(f"{Fore.YELLOW}所有机器人的签到完成，程序结束。{Style.RESET_ALL}")
+            email_sender.send("签到结果", checkin_handler.get_summary())
+            await client.disconnect()
+            os._exit(0)
     else:
         print("结束")
         await client.disconnect()
@@ -70,8 +46,9 @@ async def send_checkin_command(channel_id, checkin_command):
 
 
 async def setup_bot(section):
-    channel_id = config[section]['USERNAME']
-    checkin_command = config[section]['CHECKIN_COMMAND']
+
+    channel_id = config_loader.config[section]['USERNAME'].strip('@')
+    checkin_command = config_loader.config[section]['CHECKIN_COMMAND']
 
     await send_checkin_command(channel_id, checkin_command)
 
@@ -81,7 +58,8 @@ async def setup_bot(section):
 
 
 async def main():
-    for section in config.sections():
+
+    for section in config_loader.config.sections():
         if section.startswith('bot_'):
             await setup_bot(section)
 
