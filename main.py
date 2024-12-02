@@ -12,6 +12,7 @@ API_HASH = config['telegram']['API_HASH']
 client = TelegramClient('auto_sign_in_client', API_ID, API_HASH)
 
 completed_bots = set()
+messages = []  # 用于存储收到的消息
 
 
 def send_email(subject, body, to_email):
@@ -45,6 +46,9 @@ async def handle_checkin_message(event, section):
         print(f"[*] 收到机器人{sender_name} (ID: {sender_id})返回的消息:")
         print(event.message.text)
 
+        # 将收到的消息内容添加到 messages 列表
+        messages.append(f"[*] 收到机器人{sender_name} (ID: {sender_id})返回的消息:\n{event.message.text}\n{'-' * 50}\n")
+
         if event.message.text != '':
             print(f"@{sender_name} 签到完成！\n{'-' * 50}")
             completed_bots.add(sender_name)
@@ -55,9 +59,9 @@ async def handle_checkin_message(event, section):
             ]):
                 print("所有机器人的签到完成，程序结束。")
 
+                # 将所有消息内容一起发送到邮件
                 subject = "签到结果"
-                body = "Telegram 签到完成。程序已结束。\n\n" + "\n".join(
-                    [f"{sender_name} 签到成功" for sender_name in completed_bots])
+                body = "\n".join(messages) + "\n所有机器人的签到完成，程序结束。"
                 send_email(subject, body, recive)
                 await client.disconnect()
     else:
