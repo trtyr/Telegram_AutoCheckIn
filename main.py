@@ -36,6 +36,7 @@ def send_email(subject, body, to_email):
 
 
 async def handle_checkin_message(event, section):
+    recive = config['email']['RECIVE']
     if event.message:
         sender = await event.get_sender()
         sender_name = sender.username if sender.username else "未知用户名"
@@ -56,9 +57,7 @@ async def handle_checkin_message(event, section):
 
                 subject = "签到结果"
                 body = "Telegram 签到完成。程序已结束。\n\n" + "\n".join(
-                    [f"{sender_name} 签到成功"
-                     for sender_name in completed_bots])  # 使用 sender_name
-                send_email(subject, body, "z1693309049@outlook.com")
+                    [f"{sender_name} 签到成功" for sender_name in completed_bots])
                 await client.disconnect()
     else:
         print("结束")
