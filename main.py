@@ -58,6 +58,7 @@ async def handle_checkin_message(event, section):
                 subject = "签到结果"
                 body = "Telegram 签到完成。程序已结束。\n\n" + "\n".join(
                     [f"{sender_name} 签到成功" for sender_name in completed_bots])
+                send_email(subject, body, recive)
                 await client.disconnect()
     else:
         print("结束")
