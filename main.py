@@ -12,8 +12,13 @@ config_loader = ConfigLoader()
 proxy_manager = ProxyManager()
 proxy_manager.setup_proxy()
 
+<<<<<<< HEAD
 email_sender = EmailSender(config_loader.get_email_config())
 checkin_handler = CheckinHandler(len(config_loader.get_bot_configs()))
+=======
+completed_bots = set()
+messages = []  # 用于存储收到的消息
+>>>>>>> c3cc55f529c838d0ed14f17d8122268173096496
 
 telegram_creds = config_loader.get_telegram_creds()
 client = TelegramClient('auto_sign_in_client', **telegram_creds)
@@ -31,11 +36,32 @@ async def handle_checkin_message(event, section):
         checkin_handler.add_message(sender_name, sender_id, event.message.text)
         checkin_handler.mark_completed(sender_name)
 
+<<<<<<< HEAD
         if checkin_handler.is_all_completed():
             print(f"{Fore.YELLOW}所有机器人的签到完成，程序结束。{Style.RESET_ALL}")
             email_sender.send("签到结果", checkin_handler.get_summary())
             await client.disconnect()
             os._exit(0)
+=======
+        # 将收到的消息内容添加到 messages 列表
+        messages.append(f"[*] 收到机器人{sender_name} (ID: {sender_id})返回的消息:\n{event.message.text}\n{'-' * 50}\n")
+
+        if event.message.text != '':
+            print(f"@{sender_name} 签到完成！\n{'-' * 50}")
+            completed_bots.add(sender_name)
+
+            if len(completed_bots) == len([
+                    section for section in config.sections()
+                    if section.startswith('bot_')
+            ]):
+                print("所有机器人的签到完成，程序结束。")
+
+                # 将所有消息内容一起发送到邮件
+                subject = "签到结果"
+                body = "\n".join(messages) + "\n所有机器人的签到完成，程序结束。"
+                send_email(subject, body, recive)
+                await client.disconnect()
+>>>>>>> c3cc55f529c838d0ed14f17d8122268173096496
     else:
         print("结束")
         await client.disconnect()
