@@ -1,55 +1,55 @@
+import logging
 from colorama import Fore, Style
 
+logger = logging.getLogger(__name__)
 
 class CheckinHandler:
-
     def __init__(self, total_bots):
-        self.completed_bots = set()
-        self.messages = []
         self.total_bots = total_bots
+        self.completed_bots = set()
+        self.messages = {}
+        self.email_sender = None
 
-    def add_message(self, sender_name, sender_id, message):
+    def set_email_sender(self, email_sender):
+        """设置邮件发送器"""
+        self.email_sender = email_sender
 
-        escaped_message = message.encode('unicode_escape').decode()
-        log_entry = (
-            f"{Fore.BLUE}[*] 收到机器人 {sender_name} (ID: {sender_id}) 返回的消息:{Style.RESET_ALL}\n"
-            f"{Fore.WHITE}原始内容: {escaped_message}{Style.RESET_ALL}\n"
-            f"{Fore.CYAN}╔════════════════ 机器人消息 ════════════════{Style.RESET_ALL}\n"
-            f"{Fore.BLUE}│ 机器人: {Fore.MAGENTA}@{sender_name}{Style.RESET_ALL}\n"
-            f"{Fore.BLUE}│ 标识ID: {Fore.WHITE}{sender_id}{Style.RESET_ALL}\n"
-            f"{Fore.BLUE}│ 返回内容:{Style.RESET_ALL}\n"
-            f"{Fore.WHITE}│ {escaped_message}{Style.RESET_ALL}\n"
-            f"{Fore.CYAN}╚═══════════════════════════════════════════{Style.RESET_ALL}"
-        )
+    def add_message(self, bot_name, bot_id, message, nickname=None):
+        """添加机器人消息"""
+        self.messages[bot_name] = {
+            'id': bot_id,
+            'message': message,
+            'nickname': nickname or bot_name
+        }
 
-    def mark_completed(self, sender_name):
-
-        print(
-            f"\n{Fore.YELLOW}🔄 正在验证 {Fore.MAGENTA}@{sender_name:<15} {Fore.YELLOW}的签到状态...{Style.RESET_ALL}"
-        )
-        self.completed_bots.add(sender_name)
-        print(
-            f"{Fore.GREEN}✅ 成功完成 {Fore.MAGENTA}@{sender_name:<15} {Fore.GREEN}的签到！{Style.RESET_ALL}"
-        )
-
-    def add_message(self, sender_name, sender_id, message):
-
-        clean_name = sender_name.strip('@')
-        if not clean_name or clean_name == "未知用户名":
-            clean_name = f"ID_{sender_id}"
-
-        log_entry = (
-            f"\n{Fore.CYAN}╔{'═'*36} 机器人消息 {'═'*36}╗{Style.RESET_ALL}\n"
-            f"{Fore.BLUE}│ {Fore.MAGENTA}🤖 机器人: {Fore.WHITE}@{clean_name:<20}{Style.RESET_ALL}\n"
-            f"{Fore.BLUE}│ {Fore.MAGENTA}🆔 标识ID: {Fore.WHITE}{sender_id}{Style.RESET_ALL}\n"
-            f"{Fore.CYAN}╠{'═'*84}╣{Style.RESET_ALL}\n"
-            f"{Fore.WHITE}│ {message}{Style.RESET_ALL}\n"
-            f"{Fore.CYAN}╚{'═'*84}╝{Style.RESET_ALL}")
-        self.messages.append(log_entry)
-        print(log_entry)
+    def mark_completed(self, bot_name):
+        """标记机器人签到完成"""
+        self.completed_bots.add(bot_name)
+        logger.info(f"机器人 {bot_name} 签到完成")
 
     def is_all_completed(self):
-        return len(self.completed_bots) >= self.total_bots
+        """检查是否所有机器人都已完成签到"""
+        return len(self.completed_bots) == self.total_bots
 
     def get_summary(self):
-        return "\n".join(self.messages) + "\n所有机器人的签到完成，程序结束。"
+        """获取签到总结"""
+        summary = []
+        for bot_name, data in self.messages.items():
+            nickname = data.get('nickname', bot_name)
+            print(f"Debug - Bot: {bot_name}, Nickname: {nickname}, Data: {data}")  # 调试信息
+            summary.append(f"机器人: {nickname}\n消息: {data['message']}\n")
+        return "\n".join(summary)
+
+    def handle_completion(self):
+        """处理签到完成事件"""
+        if self.is_all_completed():
+            logger.info("所有机器人的签到完成")
+            if self.email_sender:
+                summary = self.get_summary()
+                print("\n=== 邮件内容预览 ===")
+                print(summary)
+                print("===================\n")
+                self.email_sender.send("Telegram签到报告", summary)
+                logger.info("签到报告邮件已发送")
+            return True
+        return False
