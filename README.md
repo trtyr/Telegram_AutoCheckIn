@@ -22,6 +22,8 @@ pip install telethon requests python-dotemail colorama
 三、配置文件说明
 编辑 config.ini
 
+> 请在`config_loader.py`中，自行修改`config.ini`的位置
+
 1. 邮箱配置 ([email] 段)
    - SENDER: 发件邮箱（推荐QQ邮箱）
    - PASSWORD: 邮箱授权码（非登录密码）
