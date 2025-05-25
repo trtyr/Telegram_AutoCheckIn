@@ -16,14 +16,31 @@ from colorama import Fore, Style
 import sys
 import asyncio
 import logging
+import configparser
+import os
+import codecs
+import traceback
+
+# 配置日志
+class UTF8StreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            # 使用 UTF-8 编码写入
+            stream.write(msg.encode('utf-8', errors='replace').decode('utf-8'))
+            stream.write(self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('telegram_checkin.log'),
-        logging.StreamHandler()
+        logging.FileHandler('telegram_checkin.log', encoding='utf-8'),
+        UTF8StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
@@ -45,6 +62,9 @@ class NetworkError(TelegramCheckinError):
 class BotError(TelegramCheckinError):
     """机器人相关错误"""
     pass
+
+# 全局事件，标记所有机器人签到完成
+all_done_event = asyncio.Event()
 
 async def handle_telegram_error(error, bot_name=""):
     """处理Telegram相关错误"""
@@ -76,115 +96,163 @@ async def send_checkin_command(client, channel_id, checkin_command, bot_name):
     except Exception as e:
         return await handle_telegram_error(e, bot_name)
 
-async def handle_checkin_message(event, section, checkin_handler):
+async def handle_checkin_message(event):
     """处理签到消息"""
     try:
-        if event.message:
-            sender = await event.get_sender()
-            sender_name = sender.username or getattr(sender, 'first_name', '') or getattr(sender, 'last_name', '') or "未知用户名"
-            sender_id = sender.id
+        message = event.message
+        if not message or not message.text:
+            return
 
-            # 获取机器人昵称
-            nickname = config_loader.config[section].get('NICKNAME', sender_name)
-            print(f"Debug - Section: {section}, Nickname from config: {nickname}")  # 调试信息
-            
-            checkin_handler.add_message(sender_name, sender_id, event.message.text, nickname)
-            checkin_handler.mark_completed(sender_name)
-            logger.info(f"收到来自 {nickname} (@{sender_name}) 的签到响应")
+        sender = await event.get_sender()
+        if not sender or not sender.username:
+            return
 
-            if checkin_handler.handle_completion():
-                await client.disconnect()
-                sys.exit(0)
+        bot_username = f"@{sender.username}"
+        nickname = config_loader.get_bot_nickname(bot_username)
+        logger.info(f"收到来自 {nickname} ({bot_username}) 的签到响应")
+        
+        # 将消息内容添加到处理器
+        checkin_handler.add_message(bot_username, message.text, nickname)
+        # 标记机器人签到完成
+        checkin_handler.mark_completed(bot_username)
+
+        if checkin_handler.is_all_completed():
+            all_done_event.set()  # 标记所有机器人完成
     except Exception as e:
-        logger.error(f"处理签到消息时发生错误: {str(e)}")
-    return False
+        logger.error(f"处理签到消息时出错: {str(e)}")
 
-async def setup_bot(client, section, config_loader, checkin_handler):
+async def setup_bot(client, bot_name, config_loader, checkin_handler):
     """设置机器人"""
     try:
-        channel_id = config_loader.config[section]['USERNAME'].strip('@')
-        checkin_command = config_loader.config[section]['CHECKIN_COMMAND']
+        logger.info(f"开始设置机器人: {bot_name}")
+        channel_id_str = config_loader.config[bot_name]['USERNAME']
+        channel_id = channel_id_str.strip('@')
+        checkin_command = config_loader.config[bot_name]['CHECKIN_COMMAND']
 
         if not channel_id or not checkin_command:
-            logger.warning(f"跳过配置不完整的机器人: {section}")
+            logger.warning(f"跳过配置不完整的机器人: {bot_name}")
+            checkin_handler.mark_completed(bot_name)
             return
 
-        success = await send_checkin_command(client, channel_id, checkin_command, section)
-        if not success:
-            return
-
-        @client.on(events.NewMessage(chats=channel_id))
+        @client.on(events.NewMessage(from_users=channel_id))
         async def handler(event):
-            if await handle_checkin_message(event, section, checkin_handler):
-                await client.disconnect()
-                sys.exit(0)
+            await handle_checkin_message(event)
+
+        success = await send_checkin_command(client, channel_id, checkin_command, bot_name)
+        if not success:
+            logger.warning(f"机器人 {bot_name} 发送签到命令失败，可能无法收到响应。")
+            checkin_handler.mark_completed(bot_name)
 
     except Exception as e:
-        logger.error(f"设置机器人 {section} 时发生错误: {str(e)}")
+        logger.error(f"设置机器人 {bot_name} 时发生错误: {str(e)}")
+        checkin_handler.mark_completed(bot_name)
 
-async def main():
+async def main(client, config_loader, email_sender):
+    """主函数"""
+    global checkin_handler
+    global all_done_event
+    all_done_event.clear()
     try:
-        # 初始化组件
-        proxy_manager = ProxyManager()
-        
-        # 检查网络
-        if not proxy_manager.setup_proxy():
-            raise NetworkError("网络连接失败")
-
-        email_sender = EmailSender(config_loader.get_email_config())
-        
-        # 获取机器人配置（只获取一次）
-        bot_configs = config_loader.get_bot_configs()
+        logger.info("[跟踪] 开始主流程")
+        bot_configs = config_loader.get_all_bot_configs()
+        all_bots_usernames = [bot['username'] for bot in bot_configs.values()]
+        logger.info(f"[跟踪] 获取到机器人配置: {bot_configs}")
         if not bot_configs:
-            raise ConfigError("没有找到有效的机器人配置")
+            logger.error("[跟踪] 没有找到任何机器人配置")
+            return
             
-        checkin_handler = CheckinHandler(len(bot_configs))
-        checkin_handler.set_email_sender(email_sender)  # 设置邮件发送器
-
+        checkin_handler = CheckinHandler(all_bots_usernames, config_loader)
+        checkin_handler.set_email_sender(email_sender)
+        
+        logger.info("[跟踪] 初始化签到处理器完成")
+        logger.info("[跟踪] 开始设置机器人...")
+        for bot_name in bot_configs.keys():
+            logger.info(f"[跟踪] 开始设置机器人: {bot_name}")
+        await asyncio.gather(*[
+            setup_bot(client, bot_name, config_loader, checkin_handler)
+            for bot_name in bot_configs.keys()
+        ])
+        logger.info("[跟踪] 所有机器人设置完成，等待签到响应...")
+        logger.info(f"[跟踪] 总共配置了 {len(bot_configs)} 个机器人")
+        
         try:
-            # 设置所有机器人
-            for section in bot_configs:
-                await setup_bot(client, section, config_loader, checkin_handler)
+            logger.info("[跟踪] 等待所有机器人签到完成或超时...")
+            await asyncio.wait_for(all_done_event.wait(), timeout=3.0)
+            logger.info("[跟踪] all_done_event 已 set")
+        except asyncio.TimeoutError:
+            logger.warning("[跟踪] 等待超时（3秒）")
+        
+        logger.info("[跟踪] 开始生成签到报告...")
+        summary = checkin_handler.get_summary()
+        logger.info(f"--- 报告内容 ---\n{summary}\n-----------------")
 
-            # 等待所有操作完成
-            await client.run_until_disconnected()
-
-        except SessionPasswordNeededError:
-            logger.error("需要两步验证密码")
-            raise
-        except PhoneCodeInvalidError:
-            logger.error("验证码无效")
-            raise
-        except Exception as e:
-            logger.error(f"Telegram客户端错误: {str(e)}")
-            raise
+        if checkin_handler.is_all_completed():
+            logger.info("[跟踪] 所有机器人签到完成，准备发送成功邮件")
+            email_sender.send("Telegram签到报告 - 成功", summary)
+        else:
+            logger.warning("[跟踪] 程序运行超时，准备发送超时邮件")
+            email_sender.send("Telegram签到报告 - 超时", summary)
 
     except Exception as e:
-        logger.error(f"程序执行出错: {str(e)}")
-        # 发送错误通知邮件
-        try:
-            email_sender.send("签到程序错误", f"程序执行出错: {str(e)}")
-        except Exception as email_error:
-            logger.error(f"发送错误通知邮件失败: {str(email_error)}")
-        sys.exit(1)
+        logger.error(f"[跟踪] 主函数执行出错: {str(e)}")
+        logger.error(traceback.format_exc())
+    finally:
+        logger.info("[跟踪] 准备断开 Telegram 连接")
+        await client.disconnect()
+        logger.info("[跟踪] Telegram 连接已断开")
 
 if __name__ == "__main__":
+    client = None
     try:
         # 初始化配置加载器
         config_loader = ConfigLoader()
         telegram_creds = config_loader.get_telegram_creds()
         
+        # 初始化网络和邮件
+        proxy_manager = ProxyManager()
+        if not proxy_manager.setup_proxy():
+            raise NetworkError("网络连接失败")
+        email_sender = EmailSender(config_loader.get_email_config())
+
         # 初始化Telegram客户端
         client = TelegramClient('auto_sign_in_client', 
                               telegram_creds['api_id'],
                               telegram_creds['api_hash'])
         
-        # 运行主程序
-        client.start()
-        client.loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        logger.info("程序被用户中断")
-        sys.exit(0)
+        async def run():
+            async with client:
+                await main(client, config_loader, email_sender)
+                try:
+                    # 设置超时时间为3秒
+                    await asyncio.wait_for(client.run_until_disconnected(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    logger.warning("程序运行超时（3秒），部分机器人可能未完成签到。")
+                    checkin_handler = CheckinHandler(0)
+                    checkin_handler.set_email_sender(email_sender)
+                    remaining = checkin_handler.get_remaining_bots()
+                    if remaining:
+                        summary = f"程序运行超时，以下机器人未完成签到：\n{', '.join(remaining)}\n\n当前签到情况：\n{checkin_handler.get_summary()}"
+                        email_sender.send("Telegram签到报告 - 超时", summary)
+                        logger.info("超时的签到报告邮件已发送")
+                    else:
+                        logger.info("所有机器人已完成签到")
+
+        asyncio.run(run())
+
+    except (ConfigError, NetworkError) as e:
+        logger.error(f"初始化错误: {e}")
+        sys.exit(1)
+    except SessionPasswordNeededError:
+        logger.error("需要两步验证密码")
+    except PhoneCodeInvalidError:
+        logger.error("验证码无效")
     except Exception as e:
         logger.error(f"程序异常退出: {str(e)}")
+        try:
+            if 'email_sender' in locals() and email_sender:
+                email_sender.send("签到程序错误", f"程序执行出错: {str(e)}")
+        except Exception as email_error:
+            logger.error(f"发送错误通知邮件失败: {str(email_error)}")
         sys.exit(1)
+    finally:
+        logger.info("程序执行完毕。")

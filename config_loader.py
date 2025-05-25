@@ -30,10 +30,7 @@ class ConfigLoader:
             if not os.path.exists(self.config_path):
                 raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
 
-            with open(self.config_path, 'r', encoding='UTF-8') as f:
-                self.config.read_file(f)
-
-            if not self.config.read(self.config_path):
+            if not self.config.read(self.config_path, encoding='utf-8'):
                 raise ValueError(f"无法读取配置文件: {self.config_path}")
 
             # 验证配置段和参数是否存在
@@ -80,18 +77,20 @@ class ConfigLoader:
             exit(1)
 
     def get_bot_configs(self):
-        """获取有效的机器人配置"""
-        bot_configs = []
+        """获取所有机器人配置"""
+        bot_configs = {}
         for section in self.config.sections():
             if section.startswith('bot_'):
-                # 验证机器人配置
-                username = self.config[section]['USERNAME'].strip()
-                command = self.config[section]['CHECKIN_COMMAND'].strip()
-                if not username or not command:
-                    logger.warning(f"⚠ 警告: 机器人 {section} 配置不完整，将被跳过")
-                    continue
-                bot_configs.append(section)
+                bot_configs[section] = {
+                    'username': self.config[section].get('USERNAME'),
+                    'checkin_command': self.config[section].get('CHECKIN_COMMAND'),
+                    'nickname': self.config[section].get('NICKNAME', section)
+                }
         return bot_configs
+
+    def get_all_bot_configs(self):
+        """获取所有机器人配置（与get_bot_configs保持兼容）"""
+        return self.get_bot_configs()
 
     def get_telegram_creds(self):
         return {
@@ -105,3 +104,10 @@ class ConfigLoader:
             'password': self.config['email']['PASSWORD'].strip(),
             'receiver': self.config['email']['RECIVE'].strip()
         }
+
+    def get_bot_nickname(self, username):
+        """根据@username查找NICKNAME，没有则返回username本身"""
+        for section in self.config.sections():
+            if section.startswith('bot_') and self.config[section].get('USERNAME', '').strip('@') == username.strip('@'):
+                return self.config[section].get('NICKNAME', username)
+        return username

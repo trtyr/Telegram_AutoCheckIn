@@ -19,25 +19,24 @@ class EmailSender:
 
     def _create_html_content(self, body):
         """创建HTML格式的邮件内容"""
-        # 提取机器人信息
-        bot_info = []
-        current_bot = None
-        current_message = []
-        
+        # 根据body内容判断成功或失败
+        is_success = "❌ 未完成签到机器人:" not in body
+
+        # 为成功和失败的机器人列表添加不同的样式
+        formatted_body = ""
         for line in body.split('\n'):
-            if "机器人:" in line:
-                # 如果已经有上一个机器人的信息，保存它
-                if current_bot:
-                    bot_info.append(f'<li><strong>{current_bot}</strong><br>{chr(10).join(current_message)}</li>')
-                # 开始新的机器人信息
-                current_bot = line.split('机器人:')[1].strip()
-                current_message = []
-            elif line.strip() and current_bot:
-                current_message.append(line.strip())
-        
-        # 添加最后一个机器人的信息
-        if current_bot:
-            bot_info.append(f'<li><strong>{current_bot}</strong><br>{chr(10).join(current_message)}</li>')
+            if "✅" in line:
+                formatted_body += f'<h4 style="color: #27ae60; margin-top: 20px;">{line}</h4>'
+            elif "❌" in line:
+                formatted_body += f'<h4 style="color: #c0392b; margin-top: 20px;">{line}</h4>'
+            else:
+                # 为每个机器人条目添加卡片样式
+                formatted_body += f"""
+                <div style="background: #fdfdfd; border-left: 3px solid { '#27ae60' if is_success else '#f39c12' }; 
+                            padding: 10px 15px; margin: 8px 0; border-radius: 5px; font-size: 0.95em;">
+                    {line}
+                </div>
+                """
 
         # 创建HTML模板
         html_content = f"""
@@ -48,95 +47,49 @@ class EmailSender:
             <style>
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                    line-height: 1.5;
-                    color: #2c3e50;
-                    max-width: 500px;
-                    margin: 0 auto;
-                    padding: 15px;
-                    background-color: #f8f9fa;
+                    line-height: 1.6;
+                    color: #34495e;
+                    background-color: #f4f7f6;
+                    margin: 0;
+                    padding: 20px;
                 }}
-                .card {{
-                    background: white;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background: #ffffff;
+                    border-radius: 12px;
+                    box-shadow: 0 6px 18px rgba(0,0,0,0.07);
                     overflow: hidden;
                 }}
                 .header {{
-                    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+                    background: linear-gradient(135deg, {'#3498db, #2980b9' if is_success else '#f39c12, #e67e22'});
                     color: white;
-                    padding: 15px 20px;
+                    padding: 25px;
                     text-align: center;
-                }}
-                .header h2 {{
-                    margin: 0;
-                    font-size: 1.2em;
-                    font-weight: 500;
+                    font-size: 1.5em;
                 }}
                 .content {{
-                    padding: 20px;
-                }}
-                .content h3 {{
-                    margin: 0 0 15px 0;
-                    font-size: 1.1em;
-                    color: #2c3e50;
-                }}
-                .bot-list {{
-                    list-style: none;
-                    padding: 0;
-                    margin: 0;
-                }}
-                .bot-list li {{
-                    background: #f8f9fa;
-                    margin: 8px 0;
-                    padding: 10px 15px;
-                    border-radius: 6px;
-                    font-size: 0.95em;
-                    color: #34495e;
-                    border-left: 3px solid #4CAF50;
-                    transition: all 0.3s ease;
-                }}
-                .bot-list li:hover {{
-                    transform: translateX(5px);
-                    background: #f1f3f5;
-                }}
-                .bot-list li strong {{
-                    color: #2c3e50;
-                    display: block;
-                    margin-bottom: 5px;
+                    padding: 25px 30px;
                 }}
                 .footer {{
                     text-align: center;
-                    padding: 15px;
-                    color: #7f8c8d;
-                    font-size: 0.85em;
-                    border-top: 1px solid #eee;
-                }}
-                @media (max-width: 500px) {{
-                    body {{
-                        padding: 10px;
-                    }}
-                    .content {{
-                        padding: 15px;
-                    }}
-                    .bot-list li {{
-                        padding: 8px 12px;
-                    }}
+                    padding: 20px;
+                    color: #95a5a6;
+                    font-size: 0.9em;
+                    border-top: 1px solid #ecf0f1;
                 }}
             </style>
         </head>
         <body>
-            <div class="card">
+            <div class="container">
                 <div class="header">
-                    <h2>📱 Telegram 签到报告</h2>
+                    <strong>Telegram 签到报告</strong>
                 </div>
                 <div class="content">
-                    <h3>✅ 签到结果</h3>
-                    <ul class="bot-list">
-                        {''.join(bot_info)}
-                    </ul>
+                    {formatted_body}
                 </div>
                 <div class="footer">
-                    <p>⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <p>报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                 </div>
             </div>
         </body>
