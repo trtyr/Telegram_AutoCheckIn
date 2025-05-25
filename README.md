@@ -37,20 +37,6 @@ USERNAME = @bot  # 机器人用户名
 CHECKIN_COMMAND = /checkin # 签到命令
 ```
 
-四、运行流程
-
-1. 启动程序：
-
-```bash
-python main.py
-```
-
-程序将自动执行：
-- 网络检测（通过 `ProxyManager.setup_proxy` ）
-- 加载配置（通过 `ConfigLoader` ）
-- 发送签到命令（通过 `CheckinHandler` ）
-- 邮件通知结果（通过 `EmailSender` ）
-
 五、注意事项
 
 1. 首次运行需要登录 Telegram 账号
